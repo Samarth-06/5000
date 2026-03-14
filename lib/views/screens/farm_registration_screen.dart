@@ -6,287 +6,300 @@ import '../../core/constants/app_colors.dart';
 import '../../models/farm_hive_model.dart';
 import '../../viewmodels/farm_providers.dart';
 import '../widgets/glass_card.dart';
-import '../widgets/farm_parallax_background.dart';
-import 'dashboard_shell.dart';
 
 class FarmRegistrationScreen extends ConsumerStatefulWidget {
-  final bool isFirstLaunch;
-  final double? preLat;
-  final double? preLng;
+  final double? initialLatitude;
+  final double? initialLongitude;
   final List<LatLng>? polygonPoints;
+
   const FarmRegistrationScreen({
     Key? key,
-    this.isFirstLaunch = true,
-    this.preLat,
-    this.preLng,
+    this.initialLatitude,
+    this.initialLongitude,
     this.polygonPoints,
   }) : super(key: key);
 
   @override
-  ConsumerState<FarmRegistrationScreen> createState() => _FarmRegistrationScreenState();
+  ConsumerState<FarmRegistrationScreen> createState() =>
+      _FarmRegistrationScreenState();
 }
 
-class _FarmRegistrationScreenState extends ConsumerState<FarmRegistrationScreen> {
-  final _formKey = GlobalKey<FormState>();
+class _FarmRegistrationScreenState
+    extends ConsumerState<FarmRegistrationScreen> {
   final _nameCtrl = TextEditingController();
-  final _latCtrl = TextEditingController(text: '21.1458');
-  final _lngCtrl = TextEditingController(text: '79.0882');
+  final _cropTypeCtrl = TextEditingController(text: 'Pomegranate');
   final _areaCtrl = TextEditingController(text: '5.0');
-  String _selectedCrop = 'Wheat';
+  late final TextEditingController _latCtrl;
+  late final TextEditingController _lngCtrl;
   bool _isRegistering = false;
-
-  final List<String> _crops = ['Wheat', 'Rice', 'Cotton', 'Maize', 'Sugarcane', 'Soybean', 'Pulses'];
 
   @override
   void initState() {
     super.initState();
-    if (widget.preLat != null) _latCtrl.text = widget.preLat!.toStringAsFixed(6);
-    if (widget.preLng != null) _lngCtrl.text = widget.preLng!.toStringAsFixed(6);
+    _latCtrl = TextEditingController(
+      text: (widget.initialLatitude ?? 18.5204).toStringAsFixed(6),
+    );
+    _lngCtrl = TextEditingController(
+      text: (widget.initialLongitude ?? 73.8567).toStringAsFixed(6),
+    );
   }
 
   @override
   void dispose() {
     _nameCtrl.dispose();
+    _cropTypeCtrl.dispose();
+    _areaCtrl.dispose();
     _latCtrl.dispose();
     _lngCtrl.dispose();
-    _areaCtrl.dispose();
     super.dispose();
   }
 
-  Future<void> _registerFarm() async {
-    if (!_formKey.currentState!.validate()) return;
+  Future<void> _register() async {
+    final name = _nameCtrl.text.trim();
+    if (name.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please enter a farm name'),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+      return;
+    }
+
     setState(() => _isRegistering = true);
 
     final farm = FarmHiveModel(
       id: const Uuid().v4(),
-      name: _nameCtrl.text.trim(),
-      cropType: _selectedCrop,
-      latitude: double.parse(_latCtrl.text.trim()),
-      longitude: double.parse(_lngCtrl.text.trim()),
-      areaInAcres: double.parse(_areaCtrl.text.trim()),
+      name: name,
+      cropType: _cropTypeCtrl.text.trim(),
+      latitude: double.tryParse(_latCtrl.text) ?? 18.5204,
+      longitude: double.tryParse(_lngCtrl.text) ?? 73.8567,
+      areaInAcres: double.tryParse(_areaCtrl.text) ?? 5.0,
     );
 
-    // Try to register polygon on Agromonitoring and store ID
-    final agroService = ref.read(agroApiProvider);
-    final polygonId = await agroService.createPolygon(
-      name: farm.name,
-      lat: farm.latitude,
-      lng: farm.longitude,
-    );
-    if (polygonId != null) farm.agroPolygonId = polygonId;
+    // Try to add polygon via API
+    if (widget.polygonPoints != null && widget.polygonPoints!.isNotEmpty) {
+      final api = ref.read(sat2farmApiProvider);
+      final polygonData = {
+        'name': name,
+        'geo_json': {
+          'type': 'Feature',
+          'properties': {},
+          'geometry': {
+            'type': 'Polygon',
+            'coordinates': [
+              widget.polygonPoints!
+                  .map((p) => [p.longitude, p.latitude])
+                  .toList(),
+            ],
+          },
+        },
+      };
+      final result = await api.addPolygon(polygonData);
+      if (result != null) {
+        farm.agroPolygonId = result.farmId;
+      }
+    }
 
     await ref.read(farmListProvider.notifier).addFarm(farm);
     ref.read(selectedFarmProvider.notifier).select(farm);
 
-    if (!mounted) return;
     setState(() => _isRegistering = false);
 
-    if (widget.isFirstLaunch) {
-      Navigator.pushReplacement(context,
-          MaterialPageRoute(builder: (_) => const DashboardShell()));
-    } else {
-      Navigator.pop(context);
-    }
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Farm "${farm.name}" registered!'),
+        backgroundColor: AppColors.primaryAccent,
+      ),
+    );
+    Navigator.pop(context);
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: FarmParallaxBackground(
-        child: SafeArea(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
-            child: Form(
-              key: _formKey,
+      appBar: AppBar(
+        title: const Text(
+          'REGISTER FARM',
+          style: TextStyle(
+            color: AppColors.primaryAccent,
+            fontSize: 16,
+            letterSpacing: 1.5,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          children: [
+            GlassCard(
+              width: double.infinity,
+              padding: const EdgeInsets.all(24),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Header
-                  const SizedBox(height: 20),
-                  Row(
+                  const Row(
                     children: [
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: AppColors.primaryAccent.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: AppColors.primaryAccent.withOpacity(0.4)),
-                        ),
-                        child: const Icon(Icons.agriculture, color: AppColors.primaryAccent, size: 32),
+                      Icon(
+                        Icons.agriculture,
+                        color: AppColors.primaryAccent,
+                        size: 22,
                       ),
-                      const SizedBox(width: 16),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text('REGISTER FARM', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white, letterSpacing: 1.5)),
-                          Text(widget.isFirstLaunch ? 'Set up your first farm' : 'Add a new farm',
-                              style: const TextStyle(color: Colors.white54, fontSize: 14)),
-                        ],
-                      )
+                      SizedBox(width: 8),
+                      Text(
+                        'FARM DETAILS',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 1,
+                        ),
+                      ),
                     ],
                   ),
-                  const SizedBox(height: 36),
-
-                  // Farm Name
-                  GlassCard(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(20),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        _sectionLabel('Farm Details', Icons.eco),
-                        const SizedBox(height: 16),
-                        _buildField('Farm Name', _nameCtrl, Icons.landscape,
-                            validator: (v) => (v == null || v.isEmpty) ? 'Required' : null),
-                        const SizedBox(height: 16),
-                        _cropDropdown(),
-                        const SizedBox(height: 16),
-                        _buildField('Area (Acres)', _areaCtrl, Icons.area_chart,
-                            keyboardType: TextInputType.number,
-                            validator: (v) => double.tryParse(v ?? '') == null ? 'Enter valid number' : null),
-                      ],
-                    ),
+                  const SizedBox(height: 24),
+                  _field(
+                    label: 'Farm Name',
+                    icon: Icons.edit,
+                    ctrl: _nameCtrl,
+                    hint: 'My Pomegranate Farm',
                   ),
-
                   const SizedBox(height: 16),
-
-                  // Coordinates
-                  GlassCard(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(20),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        _sectionLabel('GPS Coordinates', Icons.gps_fixed),
-                        const SizedBox(height: 4),
-                        const Text('Enter your farm\'s coordinates or use GPS',
-                            style: TextStyle(color: Colors.white38, fontSize: 12)),
-                        const SizedBox(height: 16),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: _buildField('Latitude', _latCtrl, Icons.arrow_upward,
-                                  keyboardType: TextInputType.number,
-                                  validator: (v) => double.tryParse(v ?? '') == null ? 'Invalid' : null),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: _buildField('Longitude', _lngCtrl, Icons.arrow_forward,
-                                  keyboardType: TextInputType.number,
-                                  validator: (v) => double.tryParse(v ?? '') == null ? 'Invalid' : null),
-                            ),
-                          ],
+                  _field(
+                    label: 'Crop Type',
+                    icon: Icons.grass,
+                    ctrl: _cropTypeCtrl,
+                  ),
+                  const SizedBox(height: 16),
+                  _field(
+                    label: 'Area (Acres)',
+                    icon: Icons.square_foot,
+                    ctrl: _areaCtrl,
+                    isNumber: true,
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _field(
+                          label: 'Latitude',
+                          icon: Icons.location_on,
+                          ctrl: _latCtrl,
+                          isNumber: true,
                         ),
-                        const SizedBox(height: 12),
-                        SizedBox(
-                          width: double.infinity,
-                          child: OutlinedButton.icon(
-                            onPressed: () {
-                              // TODO: actual GPS detection
-                              _latCtrl.text = '21.1458';
-                              _lngCtrl.text = '79.0882';
-                              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                                content: Text('GPS location detected! (demo)'),
-                                backgroundColor: Color(0xFF228B22),
-                              ));
-                            },
-                            icon: const Icon(Icons.my_location, color: AppColors.secondaryAccent2),
-                            label: const Text('Detect My Location', style: TextStyle(color: AppColors.secondaryAccent2)),
-                            style: OutlinedButton.styleFrom(
-                              side: const BorderSide(color: AppColors.secondaryAccent2),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _field(
+                          label: 'Longitude',
+                          icon: Icons.location_on,
+                          ctrl: _lngCtrl,
+                          isNumber: true,
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (widget.polygonPoints != null) ...[
+                    const SizedBox(height: 16),
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: AppColors.primaryAccent.withOpacity(0.08),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: AppColors.primaryAccent.withOpacity(0.3),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(
+                            Icons.timeline,
+                            color: AppColors.primaryAccent,
+                            size: 16,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Polygon: ${widget.polygonPoints!.length} vertices',
+                            style: const TextStyle(
+                              color: AppColors.primaryAccent,
+                              fontSize: 12,
                             ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
-                  ),
-
-                  const SizedBox(height: 28),
-
-                  // Register Button
+                  ],
+                  const SizedBox(height: 30),
                   SizedBox(
                     width: double.infinity,
-                    height: 56,
+                    height: 50,
                     child: ElevatedButton.icon(
-                      onPressed: _isRegistering ? null : _registerFarm,
+                      onPressed: _isRegistering ? null : _register,
                       icon: _isRegistering
-                          ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black))
-                          : const Icon(Icons.satellite_alt),
-                      label: Text(_isRegistering ? 'REGISTERING...' : 'REGISTER & SCAN SATELLITE',
-                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.black,
+                              ),
+                            )
+                          : const Icon(Icons.check_circle, size: 18),
+                      label: Text(
+                        _isRegistering ? 'REGISTERING...' : 'REGISTER FARM',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                        ),
+                      ),
                     ),
                   ),
                 ],
               ),
             ),
-          ),
+            const SizedBox(height: 80),
+          ],
         ),
       ),
     );
   }
 
-  Widget _sectionLabel(String label, IconData icon) {
-    return Row(
-      children: [
-        Icon(icon, color: AppColors.primaryAccent, size: 18),
-        const SizedBox(width: 8),
-        Text(label, style: const TextStyle(color: AppColors.primaryAccent, fontWeight: FontWeight.bold, fontSize: 14, letterSpacing: 0.8)),
-      ],
-    );
-  }
-
-  Widget _buildField(String label, TextEditingController ctrl, IconData icon,
-      {TextInputType? keyboardType, String? Function(String?)? validator}) {
-    return TextFormField(
+  Widget _field({
+    required String label,
+    required IconData icon,
+    required TextEditingController ctrl,
+    bool isNumber = false,
+    String? hint,
+  }) {
+    return TextField(
       controller: ctrl,
-      keyboardType: keyboardType,
+      keyboardType: isNumber
+          ? const TextInputType.numberWithOptions(decimal: true)
+          : TextInputType.text,
       style: const TextStyle(color: Colors.white),
-      validator: validator,
       decoration: InputDecoration(
         labelText: label,
-        labelStyle: const TextStyle(color: Colors.white54),
-        prefixIcon: Icon(icon, color: AppColors.primaryAccent, size: 20),
+        hintText: hint,
+        labelStyle: const TextStyle(color: AppColors.textSecondary),
+        hintStyle: const TextStyle(color: Colors.white24),
+        prefixIcon: Icon(icon, color: AppColors.primaryAccent, size: 18),
         enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(color: AppColors.primaryAccent.withOpacity(0.3))),
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(
+            color: AppColors.primaryAccent.withOpacity(0.4),
+          ),
+        ),
         focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(color: AppColors.primaryAccent, width: 1.5)),
-        errorBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(color: Colors.redAccent)),
-        focusedErrorBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(color: Colors.redAccent)),
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(
+            color: AppColors.primaryAccent,
+            width: 2,
+          ),
+        ),
         filled: true,
-        fillColor: Colors.black.withOpacity(0.3),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        fillColor: Colors.black.withOpacity(0.25),
       ),
-    );
-  }
-
-  Widget _cropDropdown() {
-    return DropdownButtonFormField<String>(
-      value: _selectedCrop,
-      dropdownColor: const Color(0xFF161B22),
-      style: const TextStyle(color: Colors.white),
-      decoration: InputDecoration(
-        labelText: 'Crop Type',
-        labelStyle: const TextStyle(color: Colors.white54),
-        prefixIcon: const Icon(Icons.grass, color: AppColors.primaryAccent, size: 20),
-        enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(color: AppColors.primaryAccent.withOpacity(0.3))),
-        focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(color: AppColors.primaryAccent, width: 1.5)),
-        filled: true,
-        fillColor: Colors.black.withOpacity(0.3),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      ),
-      items: _crops.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
-      onChanged: (v) => setState(() => _selectedCrop = v!),
     );
   }
 }

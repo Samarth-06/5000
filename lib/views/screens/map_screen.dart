@@ -1,14 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/constants/app_colors.dart';
-import '../../models/farm_hive_model.dart';
+import '../../core/constants/app_constants.dart';
 import '../../viewmodels/farm_providers.dart';
 import '../widgets/glass_card.dart';
 import 'farm_registration_screen.dart';
-
-enum _MapMode { view, drawPolygon }
 
 class MapScreen extends ConsumerStatefulWidget {
   const MapScreen({Key? key}) : super(key: key);
@@ -17,659 +15,550 @@ class MapScreen extends ConsumerStatefulWidget {
   ConsumerState<MapScreen> createState() => _MapScreenState();
 }
 
-class _MapScreenState extends ConsumerState<MapScreen>
-    with TickerProviderStateMixin {
-  final MapController _mapController = MapController();
+class _MapScreenState extends ConsumerState<MapScreen> {
+  final MapController _mapCtrl = MapController();
   LatLng? _pinnedLocation;
-  double _zoom = 12.0;
-  _MapMode _mode = _MapMode.view;
-
-  // Polygon drawing
+  bool _showNdviOverlay = false;
+  bool _isDrawingPolygon = false;
   final List<LatLng> _polygonPoints = [];
-
-  late AnimationController _panelAnim;
-  late Animation<Offset> _panelSlide;
-
-  @override
-  void initState() {
-    super.initState();
-    _panelAnim = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 350));
-    _panelSlide = Tween<Offset>(begin: const Offset(0, 1), end: Offset.zero)
-        .animate(CurvedAnimation(parent: _panelAnim, curve: Curves.easeOutCubic));
-  }
-
-  @override
-  void dispose() {
-    _panelAnim.dispose();
-    super.dispose();
-  }
-
-  void _onTap(TapPosition _, LatLng latlng) {
-    if (_mode == _MapMode.drawPolygon) {
-      setState(() => _polygonPoints.add(latlng));
-    } else {
-      setState(() {
-        _pinnedLocation = latlng;
-      });
-      _panelAnim.forward();
-    }
-  }
-
-  void _clearPin() {
-    _panelAnim.reverse().then((_) {
-      setState(() => _pinnedLocation = null);
-    });
-  }
-
-  void _undoPolygonPoint() {
-    if (_polygonPoints.isNotEmpty) {
-      setState(() => _polygonPoints.removeLast());
-    }
-  }
-
-  void _confirmPolygon() {
-    if (_polygonPoints.length < 3) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          backgroundColor: Color(0xFF161B22),
-          content: Text('Tap at least 3 points to form a farm boundary.',
-              style: TextStyle(color: Colors.white)),
-        ),
-      );
-      return;
-    }
-    // Compute centroid as the farm's main coordinate
-    double lat = _polygonPoints.map((p) => p.latitude).reduce((a, b) => a + b) /
-        _polygonPoints.length;
-    double lng = _polygonPoints.map((p) => p.longitude).reduce((a, b) => a + b) /
-        _polygonPoints.length;
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => FarmRegistrationScreen(
-          isFirstLaunch: false,
-          preLat: lat,
-          preLng: lng,
-          polygonPoints: List.from(_polygonPoints),
-        ),
-      ),
-    ).then((_) {
-      setState(() {
-        _polygonPoints.clear();
-        _mode = _MapMode.view;
-      });
-    });
-  }
 
   @override
   Widget build(BuildContext context) {
     final farms = ref.watch(farmListProvider);
-    final selected = ref.watch(selectedFarmProvider);
+    final selectedFarm = ref.watch(selectedFarmProvider);
+    final dashState = ref.watch(dashboardProvider);
+    final ndvi = dashState.vegetation?.ndvi ?? dashState.summary?.ndvi ?? 0.0;
 
-    final farmMarkers = farms.map((farm) {
-      final isSelected = selected?.id == farm.id;
-      return Marker(
-        point: LatLng(farm.latitude, farm.longitude),
-        width: 130,
-        height: 58,
-        child: _FarmMarker(
-          farm: farm,
-          isSelected: isSelected,
-          onTap: () {
-            ref.read(selectedFarmProvider.notifier).select(farm);
-            _mapController.move(LatLng(farm.latitude, farm.longitude), 14);
-          },
-        ),
-      );
-    }).toList();
-
-    if (_pinnedLocation != null && _mode == _MapMode.view) {
-      farmMarkers.add(
-        Marker(
-          point: _pinnedLocation!,
-          width: 60,
-          height: 80,
-          child: const _PinMarker(),
-        ),
-      );
+    // Farm polygon from API/generated
+    final polyCoords = dashState.farmPolygonCoords;
+    List<LatLng> farmBoundary = [];
+    if (polyCoords != null && polyCoords.isNotEmpty) {
+      farmBoundary = polyCoords.map((c) => LatLng(c[1], c[0])).toList();
     }
 
-    // Draw polygon vertex markers
-    final polygonMarkers = _polygonPoints
-        .asMap()
-        .entries
-        .map((e) => Marker(
-              point: e.value,
-              width: 24,
-              height: 24,
-              child: Container(
-                decoration: BoxDecoration(
-                  color: AppColors.goldAccent,
-                  shape: BoxShape.circle,
-                  border: Border.all(color: Colors.white, width: 1.5),
-                  boxShadow: [BoxShadow(color: AppColors.goldAccent.withOpacity(0.6), blurRadius: 8)],
-                ),
-                child: Center(
-                  child: Text('${e.key + 1}',
-                      style: const TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.black)),
-                ),
-              ),
-            ))
-        .toList();
-
-    final closedPolygon = _polygonPoints.length >= 2
-        ? [..._polygonPoints, _polygonPoints.first]
-        : _polygonPoints;
+    final mapTilerKey = AppConstants.mapTilerApiKey;
+    final tileUrl =
+        'https://api.maptiler.com/maps/satellite/{z}/{x}/{y}.jpg?key=$mapTilerKey';
 
     return Scaffold(
       body: Stack(
         children: [
+          // Map with MapTiler tiles
           FlutterMap(
-            mapController: _mapController,
+            mapController: _mapCtrl,
             options: MapOptions(
-              initialCenter: const LatLng(21.1458, 79.0882),
-              initialZoom: _zoom,
-              onTap: _onTap,
+              initialCenter: selectedFarm != null
+                  ? LatLng(selectedFarm.latitude, selectedFarm.longitude)
+                  : const LatLng(18.5204, 73.8567),
+              initialZoom: 16.0,
+              onTap: (_, latLng) {
+                if (_isDrawingPolygon) {
+                  setState(() => _polygonPoints.add(latLng));
+                } else {
+                  setState(() => _pinnedLocation = latLng);
+                }
+              },
             ),
             children: [
               TileLayer(
-                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                userAgentPackageName: 'com.smartfarm.smart_farm',
-                tileBuilder: _darkTileBuilder,
+                urlTemplate: tileUrl,
+                userAgentPackageName: 'com.sat2farm.app',
+                maxZoom: 20,
               ),
-              // Farm polygon overlay
-              if (_polygonPoints.length >= 2)
-                PolylineLayer(
-                  polylines: [
-                    Polyline(
-                      points: closedPolygon,
-                      color: AppColors.goldAccent.withOpacity(0.8),
-                      strokeWidth: 2.5,
+
+              // Farm boundary polygon from /showPolygon or generated
+              if (farmBoundary.isNotEmpty)
+                PolygonLayer(
+                  polygons: [
+                    Polygon(
+                      points: farmBoundary,
+                      color: AppColors.primaryAccent.withOpacity(0.1),
+                      borderColor: AppColors.primaryAccent,
+                      borderStrokeWidth: 2.5,
                     ),
                   ],
                 ),
-              if (_polygonPoints.length >= 3)
+
+              // NDVI grid inside the farm polygon
+              if (_showNdviOverlay && farmBoundary.isNotEmpty)
+                _buildNdviGridOverlay(farmBoundary, ndvi),
+
+              // Farm markers
+              MarkerLayer(
+                markers: farms.map((f) {
+                  final isSelected = selectedFarm?.id == f.id;
+                  return Marker(
+                    point: LatLng(f.latitude, f.longitude),
+                    width: isSelected ? 50 : 40,
+                    height: isSelected ? 50 : 40,
+                    child: GestureDetector(
+                      onTap: () {
+                        ref.read(selectedFarmProvider.notifier).select(f);
+                        _mapCtrl.move(LatLng(f.latitude, f.longitude), 16);
+                      },
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: isSelected
+                              ? AppColors.primaryAccent
+                              : AppColors.secondaryAccent2,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 2),
+                          boxShadow: [
+                            BoxShadow(
+                              color:
+                                  (isSelected
+                                          ? AppColors.primaryAccent
+                                          : AppColors.secondaryAccent2)
+                                      .withOpacity(0.6),
+                              blurRadius: 10,
+                            ),
+                          ],
+                        ),
+                        child: const Icon(
+                          Icons.agriculture,
+                          color: Colors.white,
+                          size: 18,
+                        ),
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+
+              // Pinned marker
+              if (_pinnedLocation != null)
+                MarkerLayer(
+                  markers: [
+                    Marker(
+                      point: _pinnedLocation!,
+                      width: 40,
+                      height: 40,
+                      child: const Icon(
+                        Icons.location_pin,
+                        color: Colors.redAccent,
+                        size: 40,
+                      ),
+                    ),
+                  ],
+                ),
+
+              // User-drawn polygon
+              if (_polygonPoints.isNotEmpty)
                 PolygonLayer(
                   polygons: [
                     Polygon(
                       points: _polygonPoints,
-                      color: AppColors.goldAccent.withOpacity(0.12),
-                      borderColor: AppColors.goldAccent,
+                      color: AppColors.primaryAccent.withOpacity(0.2),
+                      borderColor: AppColors.primaryAccent,
                       borderStrokeWidth: 2,
                     ),
                   ],
                 ),
-              MarkerLayer(markers: [...farmMarkers, ...polygonMarkers]),
             ],
           ),
 
-          // ── Top toolbar ─────────────────────────────────────────────────
-          _buildTopToolbar(),
-
-          // ── Draw mode info banner ────────────────────────────────────────
-          if (_mode == _MapMode.drawPolygon) _buildDrawBanner(),
-
-          // ── No pin: hint ─────────────────────────────────────────────────
-          if (_mode == _MapMode.view && _pinnedLocation == null)
-            Positioned(
-              top: MediaQuery.of(context).padding.top + 72,
-              left: 16,
-              right: 16,
-              child: GlassCard(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                child: const Row(children: [
-                  Icon(Icons.touch_app, color: AppColors.goldAccent, size: 18),
-                  SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'Tap to drop a pin — or use Draw Shape to outline your farm',
-                      style: TextStyle(color: AppColors.goldAccent, fontSize: 12),
+          // Top info bar
+          SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                children: [
+                  if (selectedFarm != null)
+                    GlassCard(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 10,
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(
+                            Icons.agriculture,
+                            color: AppColors.primaryAccent,
+                            size: 18,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  selectedFarm.name,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                                Text(
+                                  '${selectedFarm.cropType} • ${selectedFarm.areaInAcres} acres',
+                                  style: const TextStyle(
+                                    color: Colors.white54,
+                                    fontSize: 10,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          if (_showNdviOverlay)
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 3,
+                              ),
+                              decoration: BoxDecoration(
+                                color: _ndviColor(ndvi).withOpacity(0.2),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                'NDVI: ${ndvi.toStringAsFixed(2)}',
+                                style: TextStyle(
+                                  color: _ndviColor(ndvi),
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
                     ),
-                  ),
-                ]),
+                ],
               ),
             ),
+          ),
 
-          // ── Zoom + Mode buttons ──────────────────────────────────────────
+          // Right side controls
           Positioned(
+            bottom: 80,
             right: 12,
-            bottom: 220,
             child: Column(
               children: [
-                _iconBtn(Icons.add, () {
-                  _zoom = (_zoom + 1).clamp(1.0, 19.0);
-                  _mapController.move(_mapController.camera.center, _zoom);
-                }),
+                _mapButton(
+                  icon: _showNdviOverlay ? Icons.layers_clear : Icons.layers,
+                  color: _showNdviOverlay
+                      ? AppColors.primaryAccent
+                      : Colors.white70,
+                  onTap: () =>
+                      setState(() => _showNdviOverlay = !_showNdviOverlay),
+                  tooltip: 'Show Vegetation Index',
+                ),
                 const SizedBox(height: 8),
-                _iconBtn(Icons.remove, () {
-                  _zoom = (_zoom - 1).clamp(1.0, 19.0);
-                  _mapController.move(_mapController.camera.center, _zoom);
-                }),
+                _mapButton(
+                  icon: _isDrawingPolygon ? Icons.check : Icons.draw,
+                  color: _isDrawingPolygon
+                      ? AppColors.primaryAccent
+                      : Colors.white70,
+                  onTap: () {
+                    if (_isDrawingPolygon && _polygonPoints.length >= 3) {
+                      setState(() => _isDrawingPolygon = false);
+                      _showPolygonActions(context);
+                    } else if (_isDrawingPolygon) {
+                      setState(() {
+                        _isDrawingPolygon = false;
+                        _polygonPoints.clear();
+                      });
+                    } else {
+                      setState(() {
+                        _isDrawingPolygon = true;
+                        _polygonPoints.clear();
+                      });
+                    }
+                  },
+                  tooltip: _isDrawingPolygon ? 'Finish' : 'Draw Polygon',
+                ),
                 const SizedBox(height: 8),
-                _iconBtn(Icons.my_location, () {
-                  if (selected != null) {
-                    _mapController.move(LatLng(selected.latitude, selected.longitude), 14);
-                  }
-                }),
-              ],
-            ),
-          ),
-
-          // ── Pin panel (view mode) ────────────────────────────────────────
-          if (_mode == _MapMode.view)
-            Positioned(
-              bottom: 0,
-              left: 0,
-              right: 0,
-              child: SlideTransition(
-                position: _panelSlide,
-                child: _buildPinPanel(),
-              ),
-            ),
-
-          // ── Polygon actions (draw mode) ──────────────────────────────────
-          if (_mode == _MapMode.drawPolygon) _buildPolygonActionsPanel(),
-        ],
-      ),
-    );
-  }
-
-  // ── Top Toolbar ──────────────────────────────────────────────────────────
-  Widget _buildTopToolbar() {
-    return Positioned(
-      top: 0,
-      left: 0,
-      right: 0,
-      child: Container(
-        padding: EdgeInsets.only(
-            top: MediaQuery.of(context).padding.top + 8,
-            left: 16, right: 16, bottom: 12),
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter, end: Alignment.bottomCenter,
-            colors: [Colors.black.withOpacity(0.88), Colors.transparent],
-          ),
-        ),
-        child: Row(
-          children: [
-            const Icon(Icons.map_rounded, color: AppColors.primaryAccent, size: 20),
-            const SizedBox(width: 8),
-            const Text('SATELLITE MAP',
-                style: TextStyle(color: AppColors.primaryAccent,
-                    fontWeight: FontWeight.bold, fontSize: 14, letterSpacing: 1.5)),
-            const Spacer(),
-            // Draw Shape toggle
-            GestureDetector(
-              onTap: () => setState(() {
-                _mode = _mode == _MapMode.drawPolygon ? _MapMode.view : _MapMode.drawPolygon;
-                _polygonPoints.clear();
-                _pinnedLocation = null;
-                _panelAnim.reset();
-              }),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 250),
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(
-                  color: _mode == _MapMode.drawPolygon
-                      ? AppColors.goldAccent.withOpacity(0.25)
-                      : AppColors.primaryAccent.withOpacity(0.12),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(
-                    color: _mode == _MapMode.drawPolygon
-                        ? AppColors.goldAccent
-                        : AppColors.primaryAccent.withOpacity(0.5),
-                  ),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      _mode == _MapMode.drawPolygon ? Icons.close : Icons.polyline,
-                      color: _mode == _MapMode.drawPolygon
-                          ? AppColors.goldAccent
-                          : AppColors.primaryAccent,
-                      size: 16,
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      _mode == _MapMode.drawPolygon ? 'Cancel' : 'Draw Shape',
-                      style: TextStyle(
-                        color: _mode == _MapMode.drawPolygon
-                            ? AppColors.goldAccent
-                            : AppColors.primaryAccent,
-                        fontSize: 12, fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ── Draw mode banner ──────────────────────────────────────────────────────
-  Widget _buildDrawBanner() {
-    return Positioned(
-      top: MediaQuery.of(context).padding.top + 72,
-      left: 16,
-      right: 16,
-      child: GlassCard(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        child: Row(children: [
-          const Text('🖊️', style: TextStyle(fontSize: 18)),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('DRAW MODE',
-                    style: TextStyle(color: AppColors.goldAccent,
-                        fontWeight: FontWeight.bold, fontSize: 12)),
-                Text(
-                  _polygonPoints.isEmpty
-                      ? 'Tap corners of your farm to draw its boundary'
-                      : '${_polygonPoints.length} points • Tap to add more',
-                  style: const TextStyle(color: Colors.white60, fontSize: 11),
-                ),
-              ],
-            ),
-          ),
-          if (_polygonPoints.isNotEmpty)
-            GestureDetector(
-              onTap: _undoPolygonPoint,
-              child: Container(
-                padding: const EdgeInsets.all(6),
-                decoration: BoxDecoration(
-                  color: Colors.white10,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Icon(Icons.undo, color: Colors.white70, size: 16),
-              ),
-            ),
-        ]),
-      ),
-    );
-  }
-
-  // ── Polygon actions panel ─────────────────────────────────────────────────
-  Widget _buildPolygonActionsPanel() {
-    final hasEnough = _polygonPoints.length >= 3;
-    return Positioned(
-      bottom: 0,
-      left: 0,
-      right: 0,
-      child: Container(
-        padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
-        decoration: BoxDecoration(
-          color: const Color(0xFF0D1117),
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-          border: Border.all(color: AppColors.goldAccent.withOpacity(0.3)),
-          boxShadow: [BoxShadow(color: AppColors.goldAccent.withOpacity(0.1), blurRadius: 20)],
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(width: 40, height: 4,
-                decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2))),
-            const SizedBox(height: 14),
-            Row(
-              children: [
-                const Icon(Icons.polyline, color: AppColors.goldAccent, size: 22),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('FARM SHAPE',
-                          style: TextStyle(color: AppColors.goldAccent,
-                              fontWeight: FontWeight.bold, letterSpacing: 1)),
-                      Text(
-                        _polygonPoints.isEmpty
-                            ? 'No points yet'
-                            : '${_polygonPoints.length} vertices drawn',
-                        style: const TextStyle(color: Colors.white54, fontSize: 12),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            if (_polygonPoints.length >= 2) ...[
-              // Show coordinate summary
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.05),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: Colors.white12),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    ..._polygonPoints.take(3).map((p) => Text(
-                          'Pt: ${p.latitude.toStringAsFixed(5)}, ${p.longitude.toStringAsFixed(5)}',
-                          style: const TextStyle(color: Colors.white38, fontSize: 10, fontFamily: 'monospace'),
-                        )),
-                    if (_polygonPoints.length > 3)
-                      Text('... +${_polygonPoints.length - 3} more',
-                          style: const TextStyle(color: Colors.white24, fontSize: 10)),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 12),
-            ],
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: _polygonPoints.isNotEmpty ? _undoPolygonPoint : null,
-                    icon: const Icon(Icons.undo, size: 16),
-                    label: const Text('Undo'),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: Colors.white60,
-                      side: const BorderSide(color: Colors.white24),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  flex: 2,
-                  child: ElevatedButton.icon(
-                    onPressed: hasEnough ? _confirmPolygon : null,
-                    icon: const Icon(Icons.agriculture, size: 18),
-                    label: Text(
-                      hasEnough ? 'USE THIS SHAPE' : 'Need ${3 - _polygonPoints.length} more',
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: hasEnough ? AppColors.goldAccent : Colors.white24,
-                      foregroundColor: Colors.black,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildPinPanel() {
-    if (_pinnedLocation == null) return const SizedBox.shrink();
-    return Container(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
-      decoration: BoxDecoration(
-        color: const Color(0xFF0D1117),
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-        border: Border.all(color: AppColors.primaryAccent.withOpacity(0.3)),
-        boxShadow: [BoxShadow(color: AppColors.primaryAccent.withOpacity(0.1), blurRadius: 20)],
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(width: 40, height: 4,
-              decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2))),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              const Icon(Icons.place, color: AppColors.primaryAccent, size: 28),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('LOCATION PINNED',
-                        style: TextStyle(color: AppColors.primaryAccent, fontWeight: FontWeight.bold, letterSpacing: 1)),
-                    Text(
-                      'Lat: ${_pinnedLocation!.latitude.toStringAsFixed(6)}   Lng: ${_pinnedLocation!.longitude.toStringAsFixed(6)}',
-                      style: const TextStyle(color: Colors.white54, fontSize: 12, fontFamily: 'monospace'),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: _clearPin,
-                  icon: const Icon(Icons.close, size: 16),
-                  label: const Text('Clear'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.white54,
-                    side: const BorderSide(color: Colors.white24),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                flex: 2,
-                child: ElevatedButton.icon(
-                  onPressed: () => Navigator.push(
+                _mapButton(
+                  icon: Icons.add_location_alt,
+                  color: AppColors.secondaryAccent2,
+                  onTap: () => Navigator.push(
                     context,
                     MaterialPageRoute(
                       builder: (_) => FarmRegistrationScreen(
-                        isFirstLaunch: false,
-                        preLat: _pinnedLocation!.latitude,
-                        preLng: _pinnedLocation!.longitude,
+                        initialLatitude:
+                            _pinnedLocation?.latitude ?? selectedFarm?.latitude,
+                        initialLongitude:
+                            _pinnedLocation?.longitude ??
+                            selectedFarm?.longitude,
+                        polygonPoints: _polygonPoints.isNotEmpty
+                            ? _polygonPoints
+                            : null,
                       ),
                     ),
                   ),
-                  icon: const Icon(Icons.agriculture, size: 18),
-                  label: const Text('REGISTER FARM HERE',
-                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                  style: ElevatedButton.styleFrom(
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  tooltip: 'Register Farm',
+                ),
+                const SizedBox(height: 8),
+                if (selectedFarm != null)
+                  _mapButton(
+                    icon: Icons.center_focus_strong,
+                    color: AppColors.goldAccent,
+                    onTap: () => _mapCtrl.move(
+                      LatLng(selectedFarm.latitude, selectedFarm.longitude),
+                      16,
+                    ),
+                    tooltip: 'Center',
+                  ),
+              ],
+            ),
+          ),
+
+          // NDVI legend
+          if (_showNdviOverlay)
+            Positioned(
+              bottom: 80,
+              left: 12,
+              child: GlassCard(
+                padding: const EdgeInsets.all(10),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'NDVI Scale',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    _legendRow(const Color(0xFF8B4513), '0.0–0.2 Poor'),
+                    _legendRow(const Color(0xFFDAA520), '0.2–0.4 Stressed'),
+                    _legendRow(const Color(0xFF90EE90), '0.4–0.6 Moderate'),
+                    _legendRow(const Color(0xFF006400), '0.6–1.0 Healthy'),
+                  ],
+                ),
+              ),
+            ),
+
+          if (mapTilerKey.isEmpty)
+            const Positioned(
+              top: 80,
+              left: 12,
+              right: 12,
+              child: Card(
+                color: Color(0xCC8B0000),
+                child: Padding(
+                  padding: EdgeInsets.all(10),
+                  child: Text(
+                    'MapTiler API key missing. Set MAPTILER_API_KEY in .env to load map tiles.',
+                    style: TextStyle(color: Colors.white, fontSize: 12),
                   ),
                 ),
               ),
-            ],
-          ),
+            ),
+
+          // Drawing mode indicator
+          if (_isDrawingPolygon)
+            Positioned(
+              top: 100,
+              left: 0,
+              right: 0,
+              child: Center(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: AppColors.primaryAccent.withOpacity(0.9),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    'Tap map to draw polygon (${_polygonPoints.length} points)',
+                    style: const TextStyle(
+                      color: Colors.black,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );
   }
 
-  Widget _iconBtn(IconData icon, VoidCallback onTap) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 40,
-        height: 40,
-        decoration: BoxDecoration(
-          color: const Color(0xCC0D1117),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: AppColors.primaryAccent.withOpacity(0.4)),
-          boxShadow: [BoxShadow(color: AppColors.primaryAccent.withOpacity(0.15), blurRadius: 8)],
-        ),
-        child: Icon(icon, color: AppColors.primaryAccent, size: 20),
-      ),
-    );
+  /// Build a 20x20 NDVI grid inside the farm polygon bounds.
+  Widget _buildNdviGridOverlay(List<LatLng> boundary, double baseNdvi) {
+    // Find bounding box
+    double minLat = 90, maxLat = -90, minLng = 180, maxLng = -180;
+    for (final p in boundary) {
+      if (p.latitude < minLat) minLat = p.latitude;
+      if (p.latitude > maxLat) maxLat = p.latitude;
+      if (p.longitude < minLng) minLng = p.longitude;
+      if (p.longitude > maxLng) maxLng = p.longitude;
+    }
+
+    const gridSize = 20;
+    final latStep = (maxLat - minLat) / gridSize;
+    final lngStep = (maxLng - minLng) / gridSize;
+    List<Polygon> cells = [];
+    for (int i = 0; i < gridSize; i++) {
+      for (int j = 0; j < gridSize; j++) {
+        final cellCenter = LatLng(
+          minLat + (i + 0.5) * latStep,
+          minLng + (j + 0.5) * lngStep,
+        );
+
+        // Only include cells inside the polygon
+        if (!_isPointInPolygon(cellCenter, boundary)) continue;
+
+        final color = _ndviColor(baseNdvi.clamp(0.0, 1.0));
+
+        cells.add(
+          Polygon(
+            points: [
+              LatLng(minLat + i * latStep, minLng + j * lngStep),
+              LatLng(minLat + i * latStep, minLng + (j + 1) * lngStep),
+              LatLng(minLat + (i + 1) * latStep, minLng + (j + 1) * lngStep),
+              LatLng(minLat + (i + 1) * latStep, minLng + j * lngStep),
+            ],
+            color: color.withOpacity(0.45),
+            borderColor: color.withOpacity(0.15),
+            borderStrokeWidth: 0.5,
+          ),
+        );
+      }
+    }
+
+    return PolygonLayer(polygons: cells);
   }
 
-  Widget _darkTileBuilder(BuildContext context, Widget tileWidget, TileImage tile) {
-    return ColorFiltered(
-      colorFilter: const ColorFilter.matrix(<double>[
-        0.2, 0, 0, 0, 0,
-        0, 0.4, 0, 0, 0,
-        0, 0, 0.3, 0, 0,
-        0, 0, 0, 1, 0,
-      ]),
-      child: tileWidget,
-    );
+  /// Ray-casting point-in-polygon test.
+  bool _isPointInPolygon(LatLng point, List<LatLng> polygon) {
+    bool inside = false;
+    int j = polygon.length - 1;
+    for (int i = 0; i < polygon.length; i++) {
+      if ((polygon[i].latitude > point.latitude) !=
+              (polygon[j].latitude > point.latitude) &&
+          point.longitude <
+              (polygon[j].longitude - polygon[i].longitude) *
+                      (point.latitude - polygon[i].latitude) /
+                      (polygon[j].latitude - polygon[i].latitude) +
+                  polygon[i].longitude) {
+        inside = !inside;
+      }
+      j = i;
+    }
+    return inside;
   }
-}
 
-// ─── Farm Marker ─────────────────────────────────────────────────────────────
-class _FarmMarker extends StatelessWidget {
-  final FarmHiveModel farm;
-  final bool isSelected;
-  final VoidCallback onTap;
-  const _FarmMarker({required this.farm, required this.isSelected, required this.onTap});
+  Color _ndviColor(double ndvi) {
+    if (ndvi < 0.2) return const Color(0xFF8B4513);
+    if (ndvi < 0.4) return const Color(0xFFDAA520);
+    if (ndvi < 0.6) return const Color(0xFF90EE90);
+    return const Color(0xFF006400);
+  }
 
-  @override
-  Widget build(BuildContext context) {
-    final color = isSelected ? AppColors.primaryAccent : AppColors.goldAccent;
-    return GestureDetector(
-      onTap: onTap,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
+  Widget _legendRow(Color color, String text) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 3),
+      child: Row(
         children: [
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            width: 12,
+            height: 12,
             decoration: BoxDecoration(
-              color: Colors.black87,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: color, width: isSelected ? 2 : 1),
-              boxShadow: [BoxShadow(color: color.withOpacity(0.5), blurRadius: 8)],
+              color: color,
+              borderRadius: BorderRadius.circular(3),
             ),
-            child: Text('🌾 ${farm.name}',
-                style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.bold)),
           ),
-          Container(width: 2, height: 8, color: color),
-          Container(width: 10, height: 10,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle, color: color,
-                boxShadow: [BoxShadow(color: color.withOpacity(0.7), blurRadius: 10)],
-              )),
+          const SizedBox(width: 6),
+          Text(
+            text,
+            style: const TextStyle(color: Colors.white70, fontSize: 9),
+          ),
         ],
       ),
     );
   }
-}
 
-// ─── Pin Drop Marker ─────────────────────────────────────────────────────────
-class _PinMarker extends StatelessWidget {
-  const _PinMarker();
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 36, height: 36,
+  Widget _mapButton({
+    required IconData icon,
+    required Color color,
+    required VoidCallback onTap,
+    String? tooltip,
+  }) {
+    return Tooltip(
+      message: tooltip ?? '',
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          width: 44,
+          height: 44,
           decoration: BoxDecoration(
-            color: Colors.redAccent.withOpacity(0.9),
-            shape: BoxShape.circle,
-            boxShadow: const [BoxShadow(color: Colors.red, blurRadius: 12)],
+            color: const Color(0xFF0D1117).withOpacity(0.85),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: color.withOpacity(0.5), width: 1.5),
+            boxShadow: [
+              BoxShadow(color: color.withOpacity(0.2), blurRadius: 8),
+            ],
           ),
-          child: const Icon(Icons.agriculture, color: Colors.white, size: 20),
+          child: Icon(icon, color: color, size: 20),
         ),
-        Container(width: 2, height: 20, color: Colors.redAccent),
-        Container(width: 8, height: 8,
-            decoration: const BoxDecoration(color: Colors.redAccent, shape: BoxShape.circle)),
-      ],
+      ),
+    );
+  }
+
+  void _showPolygonActions(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.cardBackground,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'Farm Polygon Created',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '${_polygonPoints.length} vertices defined',
+              style: const TextStyle(color: Colors.white54),
+            ),
+            const SizedBox(height: 20),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: () {
+                  Navigator.pop(context);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => FarmRegistrationScreen(
+                        initialLatitude: _polygonPoints.first.latitude,
+                        initialLongitude: _polygonPoints.first.longitude,
+                        polygonPoints: _polygonPoints,
+                      ),
+                    ),
+                  );
+                },
+                child: const Text('REGISTER FARM WITH POLYGON'),
+              ),
+            ),
+            const SizedBox(height: 8),
+            TextButton(
+              onPressed: () {
+                setState(() => _polygonPoints.clear());
+                Navigator.pop(context);
+              },
+              child: const Text(
+                'DISCARD',
+                style: TextStyle(color: Colors.white54),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
