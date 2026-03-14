@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_constants.dart';
+import '../../services/notification_service.dart';
 import '../../viewmodels/farm_providers.dart';
 import '../widgets/glass_card.dart';
 import '../widgets/farm_parallax_background.dart';
@@ -210,6 +211,66 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               ),
             ),
 
+            const SizedBox(height: 16),
+
+            // ── Notifications ─────────────────────────────
+            GlassCard(
+              width: double.infinity,
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _sectionHeader('NOTIFICATIONS', Icons.notifications_rounded),
+                  const SizedBox(height: 6),
+                  const Text(
+                    'Farm alerts for NDVI drops, irrigation, pests, and weather.',
+                    style: TextStyle(color: Colors.white38, fontSize: 12),
+                  ),
+                  const SizedBox(height: 16),
+                  // Request permission
+                  _notifTile(
+                    icon: Icons.notifications_active,
+                    label: 'Enable Notifications',
+                    sub: 'Request / re-grant permission',
+                    color: AppColors.primaryAccent,
+                    onTap: () async {
+                      await NotificationService.init();
+                      if (!mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          backgroundColor: Color(0xFF228B22),
+                          content: Text('Permission requested! Check device prompt.'),
+                        ),
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  // Test notification
+                  _notifTile(
+                    icon: Icons.send_rounded,
+                    label: 'Send Test Notification',
+                    sub: 'Verify alerts are working on this device',
+                    color: AppColors.softPurple,
+                    onTap: () async {
+                      await NotificationService.sendTest();
+                      if (!mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          backgroundColor: AppColors.softPurple.withOpacity(0.9),
+                          content: const Row(children: [
+                            Icon(Icons.check_circle, color: Colors.white),
+                            SizedBox(width: 8),
+                            Text('Test notification sent!',
+                                style: TextStyle(color: Colors.white)),
+                          ]),
+                        ),
+                      );
+                    },
+                  ),
+                ],
+              ),
+            ),
+
             const SizedBox(height: 24),
 
             SizedBox(
@@ -237,6 +298,45 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         const SizedBox(width: 8),
         Text(title, style: const TextStyle(color: AppColors.primaryAccent, fontWeight: FontWeight.bold, letterSpacing: 1)),
       ],
+    );
+  }
+
+  Widget _notifTile({
+    required IconData icon,
+    required String label,
+    required String sub,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.07),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: color.withOpacity(0.3)),
+        ),
+        child: Row(children: [
+          Container(
+            width: 36, height: 36,
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.15),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(icon, color: color, size: 18),
+          ),
+          const SizedBox(width: 12),
+          Expanded(child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(label, style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 13)),
+              Text(sub, style: const TextStyle(color: Colors.white38, fontSize: 11)),
+            ],
+          )),
+          Icon(Icons.chevron_right, color: color.withOpacity(0.5), size: 18),
+        ]),
+      ),
     );
   }
 

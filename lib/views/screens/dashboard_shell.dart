@@ -2,14 +2,14 @@ import 'package:flutter/material.dart';
 import '../../core/constants/app_colors.dart';
 import 'dashboard_screen.dart';
 import 'map_screen.dart';
-import 'ai_insights_screen.dart';
-import 'ai_advisor_screen.dart';
-import 'image_diagnosis_screen.dart';
-import 'soil_report_screen.dart';
+import 'ai_hub_screen.dart';
 import 'settings_screen.dart';
-import 'farm_selection_screen.dart';
-import 'farm_history_screen.dart';
 
+/// 4-tab shell:
+///   0 → Home (Dashboard)
+///   1 → AI Hub  (Insights · Advisor · Diagnose · Soil · History · Farms)
+///   2 → Map
+///   3 → Profile / Settings
 class DashboardShell extends StatefulWidget {
   const DashboardShell({Key? key}) : super(key: key);
 
@@ -22,13 +22,8 @@ class _DashboardShellState extends State<DashboardShell> {
 
   final List<Widget> _pages = const [
     DashboardScreen(),
-    FarmSelectionScreen(),
+    AiHubScreen(),
     MapScreen(),
-    FarmHistoryScreen(),
-    AiInsightsScreen(),
-    AiAdvisorScreen(),
-    ImageDiagnosisScreen(),
-    SoilReportScreen(),
     SettingsScreen(),
   ];
 
@@ -44,8 +39,8 @@ class _DashboardShellState extends State<DashboardShell> {
           ),
           boxShadow: [
             BoxShadow(
-              color: AppColors.primaryAccent.withOpacity(0.06),
-              blurRadius: 20,
+              color: AppColors.primaryAccent.withOpacity(0.08),
+              blurRadius: 24,
               offset: const Offset(0, -4),
             ),
           ],
@@ -57,18 +52,29 @@ class _DashboardShellState extends State<DashboardShell> {
           selectedItemColor: AppColors.primaryAccent,
           unselectedItemColor: Colors.white30,
           type: BottomNavigationBarType.fixed,
-          selectedLabelStyle: const TextStyle(fontSize: 8, fontWeight: FontWeight.bold),
-          unselectedLabelStyle: const TextStyle(fontSize: 8),
+          selectedLabelStyle: const TextStyle(
+            fontSize: 10,
+            fontWeight: FontWeight.bold,
+            letterSpacing: 0.5,
+          ),
+          unselectedLabelStyle: const TextStyle(fontSize: 10),
           items: const [
-            BottomNavigationBarItem(icon: Icon(Icons.dashboard_rounded, size: 20), label: 'Home'),
-            BottomNavigationBarItem(icon: Icon(Icons.agriculture, size: 20), label: 'Farms'),
-            BottomNavigationBarItem(icon: Icon(Icons.map_rounded, size: 20), label: 'Map'),
-            BottomNavigationBarItem(icon: Icon(Icons.history_rounded, size: 20), label: 'History'),
-            BottomNavigationBarItem(icon: Icon(Icons.auto_awesome, size: 20), label: 'AI'),
-            BottomNavigationBarItem(icon: Icon(Icons.smart_toy_rounded, size: 20), label: 'Advisor'),
-            BottomNavigationBarItem(icon: Icon(Icons.camera_alt_rounded, size: 20), label: 'Diagnose'),
-            BottomNavigationBarItem(icon: Icon(Icons.terrain, size: 20), label: 'Soil'),
-            BottomNavigationBarItem(icon: Icon(Icons.settings_rounded, size: 20), label: 'Settings'),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.dashboard_rounded, size: 24),
+              label: 'Home',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.auto_awesome, size: 24),
+              label: 'AI Hub',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.map_rounded, size: 24),
+              label: 'Map',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.person_rounded, size: 24),
+              label: 'Profile',
+            ),
           ],
         ),
       ),
