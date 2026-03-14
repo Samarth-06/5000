@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:fl_chart/fl_chart.dart';
 import '../../core/constants/app_colors.dart';
-import '../../models/ndvi_history_model.dart';
 import '../../viewmodels/farm_providers.dart';
 import '../widgets/glass_card.dart';
 import '../widgets/farm_parallax_background.dart';
@@ -75,8 +74,14 @@ class FarmHistoryScreen extends ConsumerWidget {
     );
   }
 
+  // ─── Helpers ─────────────────────────────────────────────────────────────
+  double _ndvi(Map<String,dynamic> h) => (h['ndvi'] as num?)?.toDouble() ?? 0.0;
+  DateTime _date(Map<String,dynamic> h) {
+    try { return DateTime.parse(h['timestamp']?.toString() ?? ''); } catch (_) { return DateTime.now(); }
+  }
+
   // ─── NDVI Trend Chart ────────────────────────────────────────────────────
-  Widget _ndviTrendCard(List<NdviHistoryModel> history) {
+  Widget _ndviTrendCard(List<Map<String,dynamic>> history) {
     if (history.isEmpty) return const SizedBox.shrink();
     return GlassCard(
       width: double.infinity,
@@ -118,7 +123,7 @@ class FarmHistoryScreen extends ConsumerWidget {
                     getTitlesWidget: (v, _) {
                       final idx = v.toInt();
                       if (idx < 0 || idx >= history.length) return const SizedBox.shrink();
-                      final d = history[idx].date;
+                      final d = _date(history[idx]);
                       return Padding(
                         padding: const EdgeInsets.only(top: 4),
                         child: Text('${d.day}/${d.month}',
@@ -138,7 +143,7 @@ class FarmHistoryScreen extends ConsumerWidget {
                   spots: history
                       .asMap()
                       .entries
-                      .map((e) => FlSpot(e.key.toDouble(), e.value.ndviValue.clamp(0.0, 1.0)))
+                      .map((e) => FlSpot(e.key.toDouble(), _ndvi(e.value).clamp(0.0, 1.0)))
                       .toList(),
                   isCurved: true,
                   curveSmoothness: 0.35,
@@ -178,7 +183,7 @@ class FarmHistoryScreen extends ConsumerWidget {
   }
 
   // ─── Timeline of NDVI Records ────────────────────────────────────────────
-  Widget _historyTimeline(List<NdviHistoryModel> history, DashboardState ds) {
+  Widget _historyTimeline(List<Map<String,dynamic>> history, DashboardState ds) {
     final reversed = history.reversed.toList();
     return GlassCard(
       width: double.infinity,
@@ -199,7 +204,8 @@ class FarmHistoryScreen extends ConsumerWidget {
             ...reversed.asMap().entries.map((entry) {
               final i = entry.key;
               final snap = entry.value;
-              final ndvi = snap.ndviValue;
+              final ndvi = _ndvi(snap);
+              final snapDate = _date(snap);
               final color = ndvi > 0.6 ? AppColors.primaryAccent : ndvi > 0.4 ? AppColors.goldAccent : Colors.redAccent;
               final statusLabel = ndvi > 0.6 ? 'Healthy' : ndvi > 0.4 ? 'Moderate' : 'Poor';
               final isLast = i == reversed.length - 1;
@@ -251,7 +257,7 @@ class FarmHistoryScreen extends ConsumerWidget {
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text(
-                                      '${snap.date.day} ${_month(snap.date.month)}, ${snap.date.year}',
+                                      '${snapDate.day} ${_month(snapDate.month)}, ${snapDate.year}',
                                       style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.bold),
                                     ),
                                     const SizedBox(height: 4),
@@ -285,11 +291,13 @@ class FarmHistoryScreen extends ConsumerWidget {
   }
 
   // ─── Comparison Card (first vs. last) ──────────────────────────────────
-  Widget _comparisionCard(List<NdviHistoryModel> history) {
+  Widget _comparisionCard(List<Map<String,dynamic>> history) {
     if (history.length < 2) return const SizedBox.shrink();
-    final first = history.first;
-    final last = history.last;
-    final delta = last.ndviValue - first.ndviValue;
+    final firstNdvi = _ndvi(history.first);
+    final lastNdvi  = _ndvi(history.last);
+    final firstDate = _date(history.first);
+    final lastDate  = _date(history.last);
+    final delta = lastNdvi - firstNdvi;
     final improved = delta > 0;
     final deltaColor = improved ? AppColors.primaryAccent : Colors.redAccent;
 
@@ -308,7 +316,7 @@ class FarmHistoryScreen extends ConsumerWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
-              _compStat('First Record', first.date, first.ndviValue, Colors.white60),
+              _compStat('First Record', firstDate, firstNdvi, Colors.white60),
               Column(children: [
                 Icon(improved ? Icons.trending_up : Icons.trending_down, color: deltaColor, size: 32),
                 Text('${improved ? '+' : ''}${delta.toStringAsFixed(3)}',
@@ -316,7 +324,7 @@ class FarmHistoryScreen extends ConsumerWidget {
                 Text(improved ? 'IMPROVED' : 'DECLINED',
                     style: TextStyle(color: deltaColor, fontSize: 10, letterSpacing: 1)),
               ]),
-              _compStat('Latest Record', last.date, last.ndviValue, Colors.white60),
+              _compStat('Latest Record', lastDate, lastNdvi, Colors.white60),
             ],
           ),
         ],

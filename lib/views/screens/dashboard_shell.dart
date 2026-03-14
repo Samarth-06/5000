@@ -3,6 +3,9 @@ import '../../core/constants/app_colors.dart';
 import 'dashboard_screen.dart';
 import 'map_screen.dart';
 import 'ai_insights_screen.dart';
+import 'ai_advisor_screen.dart';
+import 'image_diagnosis_screen.dart';
+import 'soil_report_screen.dart';
 import 'settings_screen.dart';
 import 'farm_selection_screen.dart';
 import 'farm_history_screen.dart';
@@ -23,6 +26,9 @@ class _DashboardShellState extends State<DashboardShell> {
     MapScreen(),
     FarmHistoryScreen(),
     AiInsightsScreen(),
+    AiAdvisorScreen(),
+    ImageDiagnosisScreen(),
+    SoilReportScreen(),
     SettingsScreen(),
   ];
 
@@ -32,13 +38,13 @@ class _DashboardShellState extends State<DashboardShell> {
       body: IndexedStack(index: _currentIndex, children: _pages),
       bottomNavigationBar: Container(
         decoration: BoxDecoration(
-          color: const Color(0xFF0D1117),
+          color: const Color(0xFF060D06),
           border: Border(
             top: BorderSide(color: AppColors.primaryAccent.withOpacity(0.2), width: 1),
           ),
           boxShadow: [
             BoxShadow(
-              color: AppColors.primaryAccent.withOpacity(0.07),
+              color: AppColors.primaryAccent.withOpacity(0.06),
               blurRadius: 20,
               offset: const Offset(0, -4),
             ),
@@ -49,17 +55,20 @@ class _DashboardShellState extends State<DashboardShell> {
           onTap: (idx) => setState(() => _currentIndex = idx),
           backgroundColor: Colors.transparent,
           selectedItemColor: AppColors.primaryAccent,
-          unselectedItemColor: Colors.white38,
+          unselectedItemColor: Colors.white30,
           type: BottomNavigationBarType.fixed,
-          selectedLabelStyle: const TextStyle(fontSize: 9, fontWeight: FontWeight.bold),
-          unselectedLabelStyle: const TextStyle(fontSize: 9),
+          selectedLabelStyle: const TextStyle(fontSize: 8, fontWeight: FontWeight.bold),
+          unselectedLabelStyle: const TextStyle(fontSize: 8),
           items: const [
-            BottomNavigationBarItem(icon: Icon(Icons.dashboard_rounded, size: 22), label: 'Home'),
-            BottomNavigationBarItem(icon: Icon(Icons.agriculture, size: 22), label: 'Farms'),
-            BottomNavigationBarItem(icon: Icon(Icons.map_rounded, size: 22), label: 'Map'),
-            BottomNavigationBarItem(icon: Icon(Icons.history_rounded, size: 22), label: 'History'),
-            BottomNavigationBarItem(icon: Icon(Icons.auto_awesome, size: 22), label: 'AI'),
-            BottomNavigationBarItem(icon: Icon(Icons.settings_rounded, size: 22), label: 'Settings'),
+            BottomNavigationBarItem(icon: Icon(Icons.dashboard_rounded, size: 20), label: 'Home'),
+            BottomNavigationBarItem(icon: Icon(Icons.agriculture, size: 20), label: 'Farms'),
+            BottomNavigationBarItem(icon: Icon(Icons.map_rounded, size: 20), label: 'Map'),
+            BottomNavigationBarItem(icon: Icon(Icons.history_rounded, size: 20), label: 'History'),
+            BottomNavigationBarItem(icon: Icon(Icons.auto_awesome, size: 20), label: 'AI'),
+            BottomNavigationBarItem(icon: Icon(Icons.smart_toy_rounded, size: 20), label: 'Advisor'),
+            BottomNavigationBarItem(icon: Icon(Icons.camera_alt_rounded, size: 20), label: 'Diagnose'),
+            BottomNavigationBarItem(icon: Icon(Icons.terrain, size: 20), label: 'Soil'),
+            BottomNavigationBarItem(icon: Icon(Icons.settings_rounded, size: 20), label: 'Settings'),
           ],
         ),
       ),

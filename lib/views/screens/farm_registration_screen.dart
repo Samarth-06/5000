@@ -66,14 +66,14 @@ class _FarmRegistrationScreenState extends ConsumerState<FarmRegistrationScreen>
       areaInAcres: double.parse(_areaCtrl.text.trim()),
     );
 
-    // Try to register polygon on Agromonitoring and store ID
-    final agroService = ref.read(agroApiProvider);
-    final polygonId = await agroService.createPolygon(
-      name: farm.name,
-      lat: farm.latitude,
-      lng: farm.longitude,
-    );
-    if (polygonId != null) farm.agroPolygonId = polygonId;
+    // Try to link farm with Sat2Farm API (graceful — won't block registration)
+    try {
+      await ref.read(sat2farmApiProvider).registerFarm(
+        lat: farm.latitude,
+        lng: farm.longitude,
+        farmId: farm.id,
+      );
+    } catch (_) {}
 
     await ref.read(farmListProvider.notifier).addFarm(farm);
     ref.read(selectedFarmProvider.notifier).select(farm);

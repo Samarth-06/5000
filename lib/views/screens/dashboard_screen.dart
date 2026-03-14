@@ -274,7 +274,12 @@ class DashboardScreen extends ConsumerWidget {
   }
 
   // ─── NDVI History Chart ─────────────────────────────────────────────────
-  Widget _ndviHistoryChart(List<NdviHistoryModel> history) {
+  double _hNdvi(Map<String, dynamic> h) => (h['ndvi'] as num?)?.toDouble() ?? 0.0;
+  DateTime _hDate(Map<String, dynamic> h) {
+    try { return DateTime.parse(h['timestamp']?.toString() ?? ''); } catch (_) { return DateTime.now(); }
+  }
+
+  Widget _ndviHistoryChart(List<Map<String, dynamic>> history) {
     if (history.isEmpty) return const SizedBox.shrink();
 
     return GlassCard(
@@ -313,7 +318,7 @@ class DashboardScreen extends ConsumerWidget {
                     getTitlesWidget: (v, _) {
                       final idx = v.toInt();
                       if (idx < 0 || idx >= history.length) return const SizedBox.shrink();
-                      final d = history[idx].date;
+                      final d = _hDate(history[idx]);
                       return Text('${d.day}/${d.month}', style: const TextStyle(color: Colors.white38, fontSize: 9));
                     },
                   ),
@@ -329,7 +334,7 @@ class DashboardScreen extends ConsumerWidget {
                   spots: history
                       .asMap()
                       .entries
-                      .map((e) => FlSpot(e.key.toDouble(), e.value.ndviValue))
+                      .map((e) => FlSpot(e.key.toDouble(), _hNdvi(e.value).clamp(0.0, 1.0)))
                       .toList(),
                   isCurved: true,
                   color: AppColors.primaryAccent,
