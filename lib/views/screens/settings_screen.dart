@@ -5,6 +5,7 @@ import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_constants.dart';
 import '../../viewmodels/farm_providers.dart';
 import '../widgets/glass_card.dart';
+import '../widgets/farm_parallax_background.dart';
 import 'farm_registration_screen.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
@@ -68,8 +69,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       appBar: AppBar(
         title: const Text('SETTINGS', style: TextStyle(color: AppColors.primaryAccent, letterSpacing: 1.5)),
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
+      body: FarmParallaxBackground(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -222,6 +224,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
             const SizedBox(height: 24),
           ],
+        ),
         ),
       ),
     );

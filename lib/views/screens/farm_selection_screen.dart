@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/constants/app_colors.dart';
 import '../../viewmodels/farm_providers.dart';
 import '../widgets/glass_card.dart';
+import '../widgets/farm_parallax_background.dart';
 import 'dashboard_shell.dart';
 import 'farm_registration_screen.dart';
 
@@ -15,14 +16,7 @@ class FarmSelectionScreen extends ConsumerWidget {
     final selectedFarm = ref.watch(selectedFarmProvider);
 
     return Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Color(0xFF0D1117), Color(0xFF0A192F)],
-          ),
-        ),
+      body: FarmParallaxBackground(
         child: SafeArea(
           child: Column(
             children: [

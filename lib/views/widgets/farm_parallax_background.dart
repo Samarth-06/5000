@@ -1,345 +1,223 @@
-import 'dart:math';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import '../../core/constants/app_colors.dart';
 
-// ─── Farm Scene Widget ────────────────────────────────────────────────────────
-// A layered parallax background with animated farm elements:
-//   Layer 0 (sky + gradient)  – stationary
-//   Layer 1 (clouds)          – slow leftward drift
-//   Layer 2 (hills/trees)     – medium parallax
-//   Layer 3 (foreground)      – crops, fence with scroll
-//   Overlay  (rain)           – vertical drop animation
-
+/// Background: slowly drifting isometric 3D grid that also tilts
+/// with touch. Much lower intensity than before.
 class FarmParallaxBackground extends StatefulWidget {
   final Widget child;
   final ScrollController? scrollController;
-  const FarmParallaxBackground({
-    Key? key,
-    required this.child,
-    this.scrollController,
-  }) : super(key: key);
+  const FarmParallaxBackground({Key? key, required this.child, this.scrollController}) : super(key: key);
 
   @override
-  State<FarmParallaxBackground> createState() => _FarmParallaxBackgroundState();
+  State<FarmParallaxBackground> createState() => _FarmParallaxBgState();
 }
 
-class _FarmParallaxBackgroundState extends State<FarmParallaxBackground>
+class _FarmParallaxBgState extends State<FarmParallaxBackground>
     with TickerProviderStateMixin {
-  late AnimationController _cloudController;
-  late AnimationController _rainController;
-  late AnimationController _floatController;
+  // Slow continual drift offset
+  late AnimationController _driftCtrl;
+  // Touch tilt
+  double _tiltX = 0.0, _tiltY = 0.0;
+  // Pulse for corner dot
+  late AnimationController _pulseCtrl;
+  Size _size = Size.zero;
 
   @override
   void initState() {
     super.initState();
-
-    _cloudController = AnimationController(
+    _driftCtrl = AnimationController(
       vsync: this,
-      duration: const Duration(seconds: 30),
+      duration: const Duration(seconds: 18),
     )..repeat();
 
-    _rainController = AnimationController(
+    _pulseCtrl = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 800),
-    )..repeat();
-
-    _floatController = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 3),
+      duration: const Duration(seconds: 2),
     )..repeat(reverse: true);
   }
 
   @override
   void dispose() {
-    _cloudController.dispose();
-    _rainController.dispose();
-    _floatController.dispose();
+    _driftCtrl.dispose();
+    _pulseCtrl.dispose();
     super.dispose();
+  }
+
+  void _onPanUpdate(DragUpdateDetails d) {
+    if (!mounted || _size == Size.zero) return;
+    setState(() {
+      _tiltX = ((d.localPosition.dx / _size.width) - 0.5).clamp(-0.5, 0.5);
+      _tiltY = ((d.localPosition.dy / _size.height) - 0.5).clamp(-0.5, 0.5);
+    });
+  }
+
+  void _onPanEnd(DragEndDetails _) {
+    setState(() {
+      _tiltX = 0;
+      _tiltY = 0;
+    });
   }
 
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      children: [
-        // ── Sky gradient ─────────────────────────────────────────────────────
-        Container(
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                Color(0xFF020C02),
-                Color(0xFF041A0A),
-                Color(0xFF021020),
-                Color(0xFF030A03),
-              ],
-              stops: [0.0, 0.35, 0.65, 1.0],
+    return LayoutBuilder(builder: (ctx, constraints) {
+      _size = Size(constraints.maxWidth, constraints.maxHeight);
+
+      return GestureDetector(
+        onPanUpdate: _onPanUpdate,
+        onPanEnd: _onPanEnd,
+        behavior: HitTestBehavior.translucent,
+        child: Stack(
+          children: [
+            // ── Animated 3D grid ──────────────────────────────────────────
+            AnimatedBuilder(
+              animation: Listenable.merge([_driftCtrl, _pulseCtrl]),
+              builder: (_, __) {
+                const maxTilt = 0.14;
+                final matrix = Matrix4.identity()
+                  ..setEntry(3, 2, 0.0008)
+                  ..rotateX(_tiltY * maxTilt - 0.22)   // base 3D tilt (isometric)
+                  ..rotateY(_tiltX * maxTilt);
+
+                return Transform(
+                  transform: matrix,
+                  alignment: Alignment.center,
+                  child: CustomPaint(
+                    painter: _GridPainter(
+                      drift: _driftCtrl.value,
+                      pulse: _pulseCtrl.value,
+                      tiltX: _tiltX,
+                      tiltY: _tiltY,
+                    ),
+                    child: const SizedBox.expand(),
+                  ),
+                );
+              },
             ),
-          ),
+
+            // ── Corner pulse dot ──────────────────────────────────────────
+            Positioned(
+              bottom: 18,
+              right: 18,
+              child: AnimatedBuilder(
+                animation: _pulseCtrl,
+                builder: (_, __) {
+                  final p = _pulseCtrl.value;
+                  return Stack(alignment: Alignment.center, children: [
+                    Container(
+                      width: 22 + p * 12,
+                      height: 22 + p * 12,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: AppColors.primaryAccent.withOpacity(0.06 * (1 - p)),
+                        border: Border.all(
+                          color: AppColors.primaryAccent.withOpacity(0.18 * (1 - p)),
+                        ),
+                      ),
+                    ),
+                    Container(
+                      width: 12, height: 12,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: AppColors.primaryAccent.withOpacity(0.15),
+                        border: Border.all(color: AppColors.primaryAccent.withOpacity(0.4)),
+                      ),
+                    ),
+                    Container(
+                      width: 5, height: 5,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: AppColors.primaryAccent.withOpacity(0.7),
+                        boxShadow: [BoxShadow(color: AppColors.primaryAccent.withOpacity(0.5), blurRadius: 6)],
+                      ),
+                    ),
+                  ]);
+                },
+              ),
+            ),
+
+            // ── Content ───────────────────────────────────────────────────
+            widget.child,
+          ],
         ),
-
-        // ── Neon grid lines ──────────────────────────────────────────────────
-        CustomPaint(
-          size: Size.infinite,
-          painter: _GridPainter(),
-        ),
-
-        // ── Glowing orbs ─────────────────────────────────────────────────────
-        AnimatedBuilder(
-          animation: _floatController,
-          builder: (_, __) {
-            final t = _floatController.value;
-            return Stack(children: [
-              _blob(Alignment(-0.8 + t * 0.1, -0.6 + t * 0.05),
-                  AppColors.primaryAccent.withOpacity(0.08), 200),
-              _blob(Alignment(0.7 - t * 0.08, 0.3 - t * 0.1),
-                  AppColors.secondaryAccent2.withOpacity(0.06), 160),
-              _blob(Alignment(-0.1 + t * 0.04, 0.7 + t * 0.03),
-                  AppColors.goldAccent.withOpacity(0.05), 140),
-            ]);
-          },
-        ),
-
-        // ── Cloud layer (slow drift) ──────────────────────────────────────────
-        AnimatedBuilder(
-          animation: _cloudController,
-          builder: (context, _) {
-            final offset = _cloudController.value;
-            return Positioned(
-              top: 40,
-              left: -300 + offset * (MediaQuery.of(context).size.width + 300),
-              right: null,
-              child: _buildCloudsRow(),
-            );
-          },
-        ),
-
-        // ── Stars / sparkles ─────────────────────────────────────────────────
-        CustomPaint(
-          size: Size.infinite,
-          painter: _StarsPainter(seed: 42),
-        ),
-
-        // ── Mountain silhouette ───────────────────────────────────────────────
-        Positioned(
-          bottom: 0,
-          left: 0,
-          right: 0,
-          child: CustomPaint(
-            painter: _MountainPainter(),
-            child: const SizedBox(height: 240),
-          ),
-        ),
-
-        // ── Farm scene row ────────────────────────────────────────────────────
-        Positioned(
-          bottom: 60,
-          left: 0,
-          right: 0,
-          child: AnimatedBuilder(
-            animation: _floatController,
-            builder: (_, __) {
-              final t = _floatController.value;
-              return Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  children: [
-                    _farmEmoji('🌾', 38 - t * 3, 0.7),
-                    _farmEmoji('🌲', 52, 0.8),
-                    _farmEmoji('🐄', 36 + t * 2, 0.6),
-                    _farmEmoji('🌽', 42, 0.75),
-                    _farmEmoji('🧹', 44 - t * 2, 0.65, isFlip: true),
-                    _farmEmoji('🌳', 56, 0.8),
-                    _farmEmoji('🌾', 36 + t * 3, 0.7),
-                    _farmEmoji('🐓', 30 - t, 0.6),
-                    _farmEmoji('🌻', 40, 0.7),
-                  ],
-                ),
-              );
-            },
-          ),
-        ),
-
-        // ── Rain overlay ──────────────────────────────────────────────────────
-        AnimatedBuilder(
-          animation: _rainController,
-          builder: (context, _) {
-            return CustomPaint(
-              size: Size.infinite,
-              painter: _RainPainter(_rainController.value),
-            );
-          },
-        ),
-
-        // ── Content on top ────────────────────────────────────────────────────
-        widget.child,
-      ],
-    );
-  }
-
-  Widget _blob(Alignment align, Color color, double size) {
-    return Align(
-      alignment: align,
-      child: Container(
-        width: size,
-        height: size,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          gradient: RadialGradient(
-            colors: [color, Colors.transparent],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _farmEmoji(String emoji, double size, double opacity,
-      {bool isFlip = false}) {
-    return Opacity(
-      opacity: opacity,
-      child: Transform.scale(
-        scaleX: isFlip ? -1 : 1,
-        child: Text(emoji, style: TextStyle(fontSize: size)),
-      ),
-    );
-  }
-
-  Widget _buildCloudsRow() {
-    return Row(
-      children: const [
-        Text('☁️', style: TextStyle(fontSize: 64, color: Colors.white12)),
-        SizedBox(width: 40),
-        Text('☁️', style: TextStyle(fontSize: 48, color: Colors.white10)),
-        SizedBox(width: 80),
-        Text('☁️', style: TextStyle(fontSize: 56, color: Colors.white12)),
-      ],
-    );
+      );
+    });
   }
 }
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Custom Painters
-// ═══════════════════════════════════════════════════════════════════════════
 
 class _GridPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = AppColors.primaryAccent.withOpacity(0.04)
-      ..strokeWidth = 0.5;
-    const step = 50.0;
-    for (double x = 0; x < size.width; x += step) {
-      canvas.drawLine(Offset(x, 0), Offset(x, size.height), paint);
-    }
-    for (double y = 0; y < size.height; y += step) {
-      canvas.drawLine(Offset(0, y), Offset(size.width, y), paint);
-    }
-  }
-
-  @override
-  bool shouldRepaint(_GridPainter o) => false;
-}
-
-class _MountainPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final darkGreen = Paint()
-      ..color = const Color(0xFF062006)
-      ..style = PaintingStyle.fill;
-    final midGreen = Paint()
-      ..color = const Color(0xFF031203)
-      ..style = PaintingStyle.fill;
-
-    // Back layer of hills
-    final back = Path()
-      ..moveTo(0, size.height * 0.7)
-      ..lineTo(size.width * 0.2, size.height * 0.3)
-      ..lineTo(size.width * 0.45, size.height * 0.55)
-      ..lineTo(size.width * 0.7, size.height * 0.25)
-      ..lineTo(size.width * 0.9, size.height * 0.45)
-      ..lineTo(size.width, size.height * 0.4)
-      ..lineTo(size.width, size.height)
-      ..lineTo(0, size.height)
-      ..close();
-    canvas.drawPath(back, midGreen);
-
-    // Front layer of hills (darker)
-    final front = Path()
-      ..moveTo(0, size.height)
-      ..lineTo(0, size.height * 0.8)
-      ..lineTo(size.width * 0.15, size.height * 0.55)
-      ..lineTo(size.width * 0.35, size.height * 0.75)
-      ..lineTo(size.width * 0.55, size.height * 0.48)
-      ..lineTo(size.width * 0.75, size.height * 0.65)
-      ..lineTo(size.width, size.height * 0.5)
-      ..lineTo(size.width, size.height)
-      ..close();
-    canvas.drawPath(front, darkGreen);
-  }
-
-  @override
-  bool shouldRepaint(_MountainPainter o) => false;
-}
-
-class _StarsPainter extends CustomPainter {
-  final int seed;
-  _StarsPainter({required this.seed});
+  final double drift;  // 0.0 – 1.0 (looping)
+  final double pulse;
+  final double tiltX;
+  final double tiltY;
+  const _GridPainter({required this.drift, required this.pulse, required this.tiltX, required this.tiltY});
 
   @override
   void paint(Canvas canvas, Size size) {
-    final rng = Random(seed);
-    final paint = Paint()..color = Colors.white;
-    for (int i = 0; i < 60; i++) {
-      final x = rng.nextDouble() * size.width;
-      final y = rng.nextDouble() * size.height * 0.6;
-      final r = rng.nextDouble() * 1.5 + 0.3;
-      paint.color = Colors.white.withOpacity(rng.nextDouble() * 0.4 + 0.1);
-      canvas.drawCircle(Offset(x, y), r, paint);
-    }
-  }
+    // Background
+    canvas.drawRect(
+      Rect.fromLTWH(0, 0, size.width, size.height),
+      Paint()..color = const Color(0xFF040904),
+    );
 
-  @override
-  bool shouldRepaint(_StarsPainter o) => false;
-}
+    const cellSize = 52.0;
+    // Drift offset: lines move diagonally bottom-right ↘ slowly
+    final offsetX = (drift * cellSize) % cellSize;
+    final offsetY = (drift * cellSize * 0.6) % cellSize;
 
-class _RainPainter extends CustomPainter {
-  final double progress;
-  static final _rng = Random(99);
-  static late List<Offset> _starts;
-  static bool _initialized = false;
+    // Touch-highlight centre
+    final touchX = (tiltX + 0.5) * size.width;
+    final touchY = (tiltY + 0.5) * size.height;
+    final isTouching = tiltX.abs() > 0.02 || tiltY.abs() > 0.02;
 
-  _RainPainter(this.progress) {
-    if (!_initialized) {
-      _starts = List.generate(
-        30,
-        (_) => Offset(_rng.nextDouble(), _rng.nextDouble()),
-      );
-      _initialized = true;
-    }
-  }
+    final minorColor = AppColors.gridLine.withOpacity(0.22); // very dim
+    final majorColor = AppColors.gridLine.withOpacity(0.40); // slightly brighter
 
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = AppColors.primaryAccent.withOpacity(0.07)
-      ..strokeWidth = 1.0
-      ..strokeCap = StrokeCap.round;
-
-    const dropLength = 18.0;
-    for (final start in _starts) {
-      final x = start.dx * size.width;
-      final rawY = (start.dy + progress) % 1.0;
-      final y = rawY * size.height;
+    // Draw lines from -cellSize to allow drift wraparound
+    // Horizontal
+    for (double y = -cellSize + offsetY; y <= size.height + cellSize; y += cellSize) {
+      final isMajor = ((y - offsetY) ~/ cellSize).abs() % 4 == 0;
+      final dist = isTouching ? (y - touchY).abs() : double.infinity;
+      final hl = isTouching ? math.max(0.0, 1.0 - dist / 90.0) : 0.0;
       canvas.drawLine(
-        Offset(x, y),
-        Offset(x - 2, y + dropLength),
-        paint,
+        Offset(-cellSize, y), Offset(size.width + cellSize, y),
+        Paint()
+          ..strokeWidth = isMajor ? 0.8 : 0.5
+          ..color = hl > 0.05
+              ? Color.lerp(isMajor ? majorColor : minorColor,
+                  AppColors.primaryAccent.withOpacity(0.45), hl)!
+              : (isMajor ? majorColor : minorColor),
+      );
+    }
+    // Vertical
+    for (double x = -cellSize + offsetX; x <= size.width + cellSize; x += cellSize) {
+      final isMajor = ((x - offsetX) ~/ cellSize).abs() % 4 == 0;
+      final dist = isTouching ? (x - touchX).abs() : double.infinity;
+      final hl = isTouching ? math.max(0.0, 1.0 - dist / 90.0) : 0.0;
+      canvas.drawLine(
+        Offset(x, -cellSize), Offset(x, size.height + cellSize),
+        Paint()
+          ..strokeWidth = isMajor ? 0.8 : 0.5
+          ..color = hl > 0.05
+              ? Color.lerp(isMajor ? majorColor : minorColor,
+                  AppColors.primaryAccent.withOpacity(0.45), hl)!
+              : (isMajor ? majorColor : minorColor),
+      );
+    }
+
+    // Subtle glow at touch point
+    if (isTouching) {
+      canvas.drawCircle(
+        Offset(touchX, touchY), 16 + pulse * 6,
+        Paint()
+          ..color = AppColors.primaryAccent.withOpacity(0.06 + pulse * 0.03)
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 16),
       );
     }
   }
 
   @override
-  bool shouldRepaint(_RainPainter o) => o.progress != progress;
+  bool shouldRepaint(_GridPainter o) =>
+      o.drift != drift || o.tiltX != tiltX || o.tiltY != tiltY || o.pulse != pulse;
 }

@@ -1,3 +1,4 @@
+import 'dart:math' as dartMath;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:fl_chart/fl_chart.dart';
@@ -5,6 +6,7 @@ import '../../core/constants/app_colors.dart';
 import '../../models/ndvi_history_model.dart';
 import '../../viewmodels/farm_providers.dart';
 import '../widgets/glass_card.dart';
+import '../widgets/farm_parallax_background.dart';
 
 class DashboardScreen extends ConsumerWidget {
   const DashboardScreen({Key? key}) : super(key: key);
@@ -39,7 +41,8 @@ class DashboardScreen extends ConsumerWidget {
           IconButton(icon: const Icon(Icons.notifications_active, color: AppColors.goldAccent), onPressed: () {}),
         ],
       ),
-      body: farm == null
+      body: FarmParallaxBackground(
+        child: farm == null
           ? _noFarmPlaceholder(context)
           : RefreshIndicator(
               color: AppColors.primaryAccent,
@@ -64,6 +67,7 @@ class DashboardScreen extends ConsumerWidget {
                 ),
               ),
             ),
+          ),
     );
   }
 
@@ -166,27 +170,32 @@ class DashboardScreen extends ConsumerWidget {
   }
 
   Widget _ndviGauge(double ndvi, Color color) {
-    return SizedBox(
-      width: 100,
-      height: 100,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          CircularProgressIndicator(
-            value: ndvi.clamp(0.0, 1.0),
-            strokeWidth: 10,
-            backgroundColor: Colors.white12,
-            valueColor: AlwaysStoppedAnimation<Color>(color),
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        SizedBox(
+          width: 110,
+          height: 70,
+          child: CustomPaint(
+            painter: _NdviArcPainter(value: ndvi.clamp(0.0, 1.0), color: color),
           ),
-          Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(ndvi.toStringAsFixed(2), style: TextStyle(color: color, fontSize: 22, fontWeight: FontWeight.bold)),
-              const Text('NDVI', style: TextStyle(color: Colors.white38, fontSize: 10)),
-            ],
-          ),
-        ],
-      ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          ndvi.toStringAsFixed(2),
+          style: TextStyle(
+              color: color,
+              fontSize: 26,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 1,
+              shadows: [Shadow(color: color.withOpacity(0.6), blurRadius: 12)]),
+        ),
+        Text('NDVI INDEX',
+            style: TextStyle(
+                color: Colors.white.withOpacity(0.4),
+                fontSize: 9,
+                letterSpacing: 1.5)),
+      ],
     );
   }
 
@@ -429,4 +438,61 @@ class DashboardScreen extends ConsumerWidget {
       ),
     );
   }
+}
+
+// ─── NDVI Semi-circle Arc Painter ────────────────────────────────────────────
+class _NdviArcPainter extends CustomPainter {
+  final double value; // 0.0 – 1.0
+  final Color color;
+  const _NdviArcPainter({required this.value, required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    const startAngle = 3.14159; // π  (left)
+    const sweepFull = 3.14159;  // π  (half-circle top arc)
+
+    final rect = Rect.fromLTWH(
+      8, 8, size.width - 16, (size.width - 16),
+    );
+
+    // Track (background arc)
+    canvas.drawArc(
+      rect, startAngle, sweepFull, false,
+      Paint()
+        ..color = Colors.white.withOpacity(0.1)
+        ..strokeWidth = 9
+        ..style = PaintingStyle.stroke
+        ..strokeCap = StrokeCap.round,
+    );
+
+    // Value fill
+    if (value > 0) {
+      canvas.drawArc(
+        rect, startAngle, sweepFull * value, false,
+        Paint()
+          ..color = color
+          ..strokeWidth = 9
+          ..style = PaintingStyle.stroke
+          ..strokeCap = StrokeCap.round
+          ..maskFilter = MaskFilter.blur(BlurStyle.normal, 4),
+      );
+    }
+
+    // End-cap glow dot
+    if (value > 0) {
+      final angle = startAngle + sweepFull * value;
+      final cx = rect.center.dx + rect.width / 2 * dartMath.cos(angle);
+      final cy = rect.center.dy + rect.height / 2 * dartMath.sin(angle);
+      canvas.drawCircle(
+        Offset(cx, cy), 5,
+        Paint()
+          ..color = color
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6),
+      );
+      canvas.drawCircle(Offset(cx, cy), 4, Paint()..color = Colors.white);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_NdviArcPainter o) => o.value != value || o.color != color;
 }
