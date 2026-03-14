@@ -59,6 +59,8 @@ class DashboardScreen extends ConsumerWidget {
                     const SizedBox(height: 16),
                     _weatherRow(dashState),
                     const SizedBox(height: 16),
+                    _geminiInsightPanel(dashState),
+                    const SizedBox(height: 16),
                     _ndviHistoryChart(dashState.ndviHistory),
                     const SizedBox(height: 16),
                     _aiInsightsRow(dashState),
@@ -357,6 +359,85 @@ class DashboardScreen extends ConsumerWidget {
               ],
             )),
           ),
+        ],
+      ),
+    );
+  }
+
+  // ─── Live Gemini AI Insight Panel (real satellite data → AI advice) ──────
+  Widget _geminiInsightPanel(DashboardState state) {
+    // Don't show if no data at all
+    if (!state.isLoading && state.geminiInsight == null && state.summary == null) {
+      return const SizedBox.shrink();
+    }
+
+    return GlassCard(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            Container(
+              width: 28, height: 28,
+              decoration: BoxDecoration(
+                color: AppColors.softPurple.withOpacity(0.15),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.auto_awesome, color: AppColors.softPurple, size: 15),
+            ),
+            const SizedBox(width: 10),
+            const Expanded(
+              child: Text('AI SATELLITE INSIGHT',
+                  style: TextStyle(color: AppColors.softPurple, fontWeight: FontWeight.bold, letterSpacing: 1, fontSize: 12)),
+            ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: AppColors.primaryAccent.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: const Text('Gemini 2.0', style: TextStyle(color: AppColors.primaryAccent, fontSize: 9, fontWeight: FontWeight.bold)),
+            ),
+          ]),
+          const Divider(color: Colors.white10, height: 20),
+          if (state.isLoading && state.geminiInsight == null)
+            // Loading shimmer rows
+            Column(children: List.generate(3, (_) => Container(
+              margin: const EdgeInsets.only(bottom: 8),
+              height: 12,
+              decoration: BoxDecoration(
+                color: Colors.white10,
+                borderRadius: BorderRadius.circular(6),
+              ),
+            )))
+          else if (state.geminiInsight != null) ...[
+            // Split into bullet points and display each
+            ...state.geminiInsight!.split('\n').where((l) => l.trim().isNotEmpty).map((line) {
+              final isEmoji = line.trim().startsWith(RegExp(r'[\u{1F300}-\u{1FFFF}]', unicode: true)) ||
+                  line.trim().startsWith('•') || line.trim().startsWith('-') ||
+                  line.trim().startsWith('*') || line.trim().startsWith('⚠') ||
+                  line.trim().startsWith('✅') || line.trim().startsWith('💧') ||
+                  line.trim().startsWith('🌿') || line.trim().startsWith('🌱') ||
+                  line.trim().startsWith('🌡') || line.trim().startsWith('📊');
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Text(
+                  line.trim().startsWith('-') || line.trim().startsWith('*')
+                      ? line.trim().replaceFirst(RegExp(r'^[-*•]\s*'), '• ')
+                      : line.trim(),
+                  style: TextStyle(
+                    color: isEmoji ? Colors.white : Colors.white70,
+                    fontSize: 12,
+                    height: 1.5,
+                    fontWeight: isEmoji ? FontWeight.w500 : FontWeight.normal,
+                  ),
+                ),
+              );
+            }),
+          ] else
+            const Text('Select a farm to generate AI insights from satellite data.',
+                style: TextStyle(color: Colors.white38, fontSize: 12)),
         ],
       ),
     );

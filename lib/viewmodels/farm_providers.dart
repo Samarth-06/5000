@@ -81,6 +81,7 @@ class DashboardState {
   final TrendResult? cropTrend;
   final List<List<double>>? farmPolygonCoords;
   final String? error;
+  final String? geminiInsight; // AI-generated text from real satellite data
 
   const DashboardState({
     this.isLoading = false,
@@ -97,6 +98,7 @@ class DashboardState {
     this.cropTrend,
     this.farmPolygonCoords,
     this.error,
+    this.geminiInsight,
   });
 
   DashboardState copyWith({
@@ -114,6 +116,7 @@ class DashboardState {
     TrendResult? cropTrend,
     List<List<double>>? farmPolygonCoords,
     String? error,
+    String? geminiInsight,
   }) => DashboardState(
     isLoading: isLoading ?? this.isLoading,
     summary: summary ?? this.summary,
@@ -129,6 +132,7 @@ class DashboardState {
     cropTrend: cropTrend ?? this.cropTrend,
     farmPolygonCoords: farmPolygonCoords ?? this.farmPolygonCoords,
     error: error,
+    geminiInsight: geminiInsight ?? this.geminiInsight,
   );
 }
 
@@ -189,14 +193,14 @@ class DashboardNotifier extends Notifier<DashboardState> {
       final api = ref.read(sat2farmApiProvider);
       final supa = ref.read(supabaseServiceProvider);
 
-      // Parallel fetch all data
+      // Parallel fetch all satellite data — pass farmId on every call
       final results = await Future.wait([
-        api.getDashboard(), // 0
-        api.getVegetationData(), // 1
-        api.getWeatherDaypart(), // 2
-        api.getCropAdvisory(), // 3
-        api.getCropCalendar(), // 4
-        api.getIrrigationData(), // 5
+        api.getDashboard(farmId: farm.id), // 0
+        api.getVegetationData(farmId: farm.id), // 1
+        api.getWeatherDaypart(farmId: farm.id), // 2
+        api.getCropAdvisory(farmId: farm.id), // 3
+        api.getCropCalendar(farmId: farm.id), // 4
+        api.getIrrigationData(farmId: farm.id), // 5
         api.getSoilReport(farm.id), // 6
         api.showPolygon(farmId: farm.agroPolygonId ?? farm.id), // 7
       ]);
@@ -314,6 +318,33 @@ class DashboardNotifier extends Notifier<DashboardState> {
         );
       } catch (_) {}
 
+      // ── Generate Gemini AI insight from REAL satellite data ───────────────
+      String? geminiInsightText;
+      try {
+        final gemini = ref.read(geminiServiceProvider);
+        final pestInfo = advisory.isNotEmpty
+            ? advisory.map((a) => '${a.title}: ${a.symptoms} → ${a.solution}').join('; ')
+            : null;
+        final extraContext = [
+          if (vegetation != null)
+            'Spectral indices — LSWI: ${vegetation.lswi.toStringAsFixed(2)}, '
+            'RVI: ${vegetation.rvi.toStringAsFixed(2)}, '
+            'Soil Moisture (SM): ${vegetation.sm.toStringAsFixed(2)}, '
+            'Capture Date: ${vegetation.captureDate}',
+          if (calendar.isNotEmpty)
+            'Crop Calendar: ${calendar.map((c) => 'Day ${c.range}: ${c.recommended}').join('; ')}',
+        ].join(' | ');
+        geminiInsightText = await gemini.getAdvice(
+          cropType: farm.cropType,
+          ndvi: ndvi,
+          soilMoisture: soilMoist,
+          temperature: temp,
+          rainProbability: rainProb,
+          pestAdvisory: pestInfo,
+          cropCalendar: extraContext.isNotEmpty ? extraContext : null,
+        );
+      } catch (_) {}
+
       state = state.copyWith(
         isLoading: false,
         summary: translatedDashboard,
@@ -329,6 +360,7 @@ class DashboardNotifier extends Notifier<DashboardState> {
         cropTrend: trendResult,
         farmPolygonCoords: polygonCoords,
         error: null,
+        geminiInsight: geminiInsightText,
       );
     } catch (e) {
       state = state.copyWith(

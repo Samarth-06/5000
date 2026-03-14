@@ -6,6 +6,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/constants/app_colors.dart';
+import '../../core/constants/app_constants.dart';
 import '../../models/farm_hive_model.dart';
 import '../../viewmodels/farm_providers.dart';
 import '../widgets/glass_card.dart';
@@ -29,6 +30,7 @@ class _MapScreenState extends ConsumerState<MapScreen>
 
   // Polygon drawing
   final List<LatLng> _polygonPoints = [];
+  bool _satelliteMode = true; // default to satellite view
 
   // Search
   final TextEditingController _searchCtrl = TextEditingController();
@@ -248,11 +250,19 @@ class _MapScreenState extends ConsumerState<MapScreen>
               onTap: _onTap,
             ),
             children: [
-              TileLayer(
-                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                userAgentPackageName: 'com.smartfarm.smart_farm',
-                tileBuilder: _darkTileBuilder,
-              ),
+              // ── Tile Layer (Satellite or Map) ─────────────────────────────
+              if (_satelliteMode)
+                TileLayer(
+                  urlTemplate:
+                      'https://api.maptiler.com/tiles/satellite/{z}/{x}/{y}.jpg?key=${AppConstants.mapTilerApiKey}',
+                  userAgentPackageName: 'com.smartfarm.smart_farm',
+                )
+              else
+                TileLayer(
+                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                  userAgentPackageName: 'com.smartfarm.smart_farm',
+                  tileBuilder: _darkTileBuilder,
+                ),
               if (_polygonPoints.length >= 2)
                 PolylineLayer(polylines: [
                   Polyline(points: closedPolygon, color: AppColors.primaryAccent.withOpacity(0.8), strokeWidth: 2.5),
@@ -359,6 +369,34 @@ class _MapScreenState extends ConsumerState<MapScreen>
                   style: TextStyle(color: AppColors.primaryAccent,
                       fontWeight: FontWeight.bold, fontSize: 13, letterSpacing: 1.5)),
               const Spacer(),
+              // ── Satellite / Map toggle ──
+              GestureDetector(
+                onTap: () => setState(() => _satelliteMode = !_satelliteMode),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 250),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: _satelliteMode ? Colors.blueGrey.withOpacity(0.3) : Colors.white10,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: _satelliteMode ? Colors.blueGrey : Colors.white24),
+                  ),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(
+                      _satelliteMode ? Icons.satellite_alt : Icons.map_outlined,
+                      color: _satelliteMode ? Colors.lightBlueAccent : Colors.white60,
+                      size: 14,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      _satelliteMode ? 'Satellite' : 'Map',
+                      style: TextStyle(
+                          color: _satelliteMode ? Colors.lightBlueAccent : Colors.white60,
+                          fontSize: 11, fontWeight: FontWeight.bold),
+                    ),
+                  ]),
+                ),
+              ),
+              const SizedBox(width: 8),
               GestureDetector(
                 onTap: () => setState(() {
                   _mode = _mode == _MapMode.drawPolygon ? _MapMode.view : _MapMode.drawPolygon;
